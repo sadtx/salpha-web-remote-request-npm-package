@@ -217,19 +217,15 @@ export class RemoteRequest implements RemoteRequestMethod {
     // Promise.all을 사용하여 병렬 처리
     await Promise.all(
       this.failedQueue.map(async ({ resolve, reject, originalRequest }) => {
-        try {
-          if (error) {
-            // 토큰 재발급 실패 시 즉시 reject
-            reject(error);
-            return;
-          }
-
-          // 토큰 재발급 성공 시 요청 재시도
-          const resp = await this._axiosInstance.request(originalRequest);
-          resolve(resp);
-        } catch (e) {
-          reject(e);
+        if (error) {
+          // 토큰 재발급 실패 시 즉시 reject
+          reject(error);
+          return;
         }
+
+        // 토큰 재발급 성공 시 요청 재시도
+        const resp = await this._axiosInstance.request(originalRequest);
+        resolve(resp);
       })
     );
     this.failedQueue = [];
