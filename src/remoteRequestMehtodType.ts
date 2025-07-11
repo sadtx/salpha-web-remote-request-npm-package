@@ -1,10 +1,10 @@
-import { AxiosResponse } from 'axios';
+import { AxiosResponse } from "axios";
 
 /**
- * @interface RemoteWebRequestMethod
+ * @interface RemoteRequestMethod
  * @description HTTP 요청 메서드들을 정의하는 인터페이스
  */
-export interface RemoteWebRequestMethod {
+export interface RemoteRequestMethod {
   /**
    * POST 요청을 보냅니다
    * @param {string} url - 요청 URL

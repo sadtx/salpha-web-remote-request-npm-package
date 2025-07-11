@@ -5,7 +5,7 @@ import axios, {
   InternalAxiosRequestConfig,
 } from "axios";
 
-import { RemoteWebRequestMethod as RemoteRequestMethod } from "./remoteWebRequestMehtodType";
+import { RemoteRequestMethod } from "./remoteRequestMehtodType";
 import { EncryptionConfig } from "./types/encryption-config";
 import { TokenRefreshConfig } from "./types/token-refresh-config";
 
@@ -28,11 +28,11 @@ export class RemoteRequest implements RemoteRequestMethod {
   }> = [];
 
   /**
-   * NewRemoteWebRequest 생성자
+   * RemoteRequest 생성자
    *
    * @param baseURL - API 서버의 기본 URL (예: 'https://api.example.com')
    * @param isUseCookie - 쿠키 사용 여부 (인증 토큰 등을 쿠키로 관리할지 결정)
-   * @param tokenConfig - 토큰 관련 설정
+   * @param tokenConfig - 토큰 관련 설정˝
    * @param encryptionConfig - 암호화 관련 설정
    * @param errorMessages - 에러 메시지 커스터마이징 (선택적)
    */
@@ -108,7 +108,7 @@ export class RemoteRequest implements RemoteRequestMethod {
   ): boolean {
     if (!url) {
       console.error(
-        "[NewRemoteRequestImpl] checkUserIsIncludeEncryptUrl :: url 확인 필요 | ",
+        "[RemoteRequestImpl] checkUserIsIncludeEncryptUrl :: url 확인 필요 | ",
         url
       );
       return false;
@@ -117,7 +117,7 @@ export class RemoteRequest implements RemoteRequestMethod {
       this.encryptionConfig?.encryptUrlStr ?? ""
     );
     console.log(
-      `[NewRemoteRequestImpl] checkUserIsIncludeEncryptUrl :: url 확인 완료 | url: ${url} | ${
+      `[RemoteRequestImpl] checkUserIsIncludeEncryptUrl :: url 확인 완료 | url: ${url} | ${
         isIncludeEncryptUrl ? "암호화 문자열 포함" : "암호화 문자열 미포함"
       }`
     );
@@ -139,7 +139,7 @@ export class RemoteRequest implements RemoteRequestMethod {
       return Promise.reject(
         this.tokenConfig.urlRequestIsEmpty ??
           new Error(
-            "[NewRemoteRequestImpl] handleTokenRefresh :: 요청 정보가 없습니다. 관리자에게 문의해주세요."
+            "[RemoteRequestImpl] handleTokenRefresh :: 요청 정보가 없습니다. 관리자에게 문의해주세요."
           )
       );
     }
@@ -147,7 +147,7 @@ export class RemoteRequest implements RemoteRequestMethod {
     // 토큰 만료 에러인지 확인 (에러 메시지나 타입으로 판단)
     const isTokenExpiredError = this.tokenConfig.checkTokenExpiredError(error);
 
-    console.log("[NewRemoteRequestImpl] handleTokenRefresh Debug");
+    console.log("[RemoteRequestImpl] handleTokenRefresh Debug");
     console.log(`error.response?.status: ${error.response?.status}`);
     console.log(
       `isTokenExpiredError: ${isTokenExpiredError}, ${
@@ -164,7 +164,7 @@ export class RemoteRequest implements RemoteRequestMethod {
       // 이미 토큰 재발급 중인 경우 대기열에 추가`
       if (this.isRefreshingToken) {
         console.log(
-          "[NewRemoteRequestImpl] 토큰 재발급 중 - 요청을 대기열에 추가"
+          "[RemoteRequestImpl] 토큰 재발급 중 - 요청을 대기열에 추가"
         );
         // 재발급 중이면, 요청을 큐에 저장하고 대기
         return new Promise((resolve, reject) => {
@@ -173,7 +173,7 @@ export class RemoteRequest implements RemoteRequestMethod {
       }
 
       // 토큰 재발급 시작
-      console.log("[NewRemoteRequestImpl] 토큰 재발급 시작");
+      console.log("[RemoteRequestImpl] 토큰 재발급 시작");
       this.isRefreshingToken = true;
 
       try {
@@ -181,11 +181,11 @@ export class RemoteRequest implements RemoteRequestMethod {
         await this.tokenConfig.refreshLogic();
 
         // 현재 요청 먼저 재시도
-        console.log("[NewRemoteRequestImpl] 현재 요청 재시도");
+        console.log("[RemoteRequestImpl] 현재 요청 재시도");
         const currentResponse = await this._axiosInstance(originalRequest);
 
         // 대기열의 모든 요청 재시도
-        console.log("[NewRemoteRequestImpl] 대기열 요청들 처리 시작");
+        console.log("[RemoteRequestImpl] 대기열 요청들 처리 시작");
         await this.processQueue(null);
 
         // 현재 요청 결과 반환
@@ -193,13 +193,13 @@ export class RemoteRequest implements RemoteRequestMethod {
       } catch (refreshError) {
         // 토큰 재발급 중 에러 발생 시 대기열의 모든 요청 실패 처리
         console.log(
-          "[NewRemoteRequestImpl] 토큰 재발급 실패 - 대기열 요청들 실패 처리"
+          "[RemoteRequestImpl] 토큰 재발급 실패 - 대기열 요청들 실패 처리"
         );
         await this.processQueue(refreshError);
         return Promise.reject(refreshError);
       } finally {
         this.isRefreshingToken = false;
-        console.log("[NewRemoteRequestImpl] 토큰 재발급 완료");
+        console.log("[RemoteRequestImpl] 토큰 재발급 완료");
       }
     }
 
@@ -235,7 +235,7 @@ export class RemoteRequest implements RemoteRequestMethod {
     this.failedQueue = [];
   }
 
-  //MARK: - RemoteWebRequestMethod 구현
+  //MARK: - RemoteRequestMethod 구현
   patch(url: string, data?: unknown): Promise<AxiosResponse<unknown>> {
     return this._axiosInstance.patch(url, data);
   }
