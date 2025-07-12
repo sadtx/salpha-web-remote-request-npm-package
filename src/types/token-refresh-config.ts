@@ -1,6 +1,4 @@
-import { AxiosError } from 'axios';
-
-import { TokenRefreshLogic } from './request-interceptor';
+import { AxiosError } from "axios";
 
 /**
  * @interface TokenConfig
@@ -9,8 +7,11 @@ import { TokenRefreshLogic } from './request-interceptor';
  * @property {function} refreshLogic - 토큰 재발급 로직
  * @property {Error} [urlRequestIsEmpty] - 요청 정보가 없을 때 에러
  */
-export interface TokenRefreshConfig {
+export interface TokenRefreshConfig<T, E> {
   checkTokenExpiredError: (error: AxiosError) => boolean;
-  refreshLogic: TokenRefreshLogic;
-  urlRequestIsEmpty?: Error;
+  tokenRefreshLogic: () => Promise<T>;
+  tokenRefreshErrorHandler: (error: E) => void;
+  errorMappers: {
+    urlRequestIsEmpty?: E;
+  };
 }

@@ -8,12 +8,20 @@ import axios, {
 import { RemoteRequestMethod } from "./remoteRequestMehtodType";
 import { EncryptionConfig } from "./types/encryption-config";
 import { TokenRefreshConfig } from "./types/token-refresh-config";
+import {
+  TokenRefreshErrorType,
+  TokenRefreshSuccessType,
+} from "./types/token-refresh-type";
 
 interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
-export class RemoteRequest implements RemoteRequestMethod {
+export class RemoteRequest<
+  T = TokenRefreshSuccessType,
+  E = TokenRefreshErrorType
+> implements RemoteRequestMethod
+{
   private _axiosInstance: AxiosInstance;
   private isRefreshingToken: boolean = false;
   /**
@@ -40,7 +48,7 @@ export class RemoteRequest implements RemoteRequestMethod {
   constructor(
     baseURL: string,
     isUseCookie: boolean,
-    private readonly tokenConfig: TokenRefreshConfig,
+    private readonly tokenConfig: TokenRefreshConfig<T, E>,
     private readonly encryptionConfig?: EncryptionConfig
   ) {
     // Axios 인스턴스 생성
@@ -137,7 +145,7 @@ export class RemoteRequest implements RemoteRequestMethod {
     // 요청 정보가 없는 경우 에러 발생
     if (!originalRequest) {
       return Promise.reject(
-        this.tokenConfig.urlRequestIsEmpty ??
+        this.tokenConfig.errorMappers.urlRequestIsEmpty ??
           new Error(
             "[RemoteRequestImpl] handleTokenRefresh :: 요청 정보가 없습니다. 관리자에게 문의해주세요."
           )
@@ -164,7 +172,7 @@ export class RemoteRequest implements RemoteRequestMethod {
       // 이미 토큰 재발급 중인 경우 대기열에 추가`
       if (this.isRefreshingToken) {
         console.log(
-          "[RemoteRequestImpl] 토큰 재발급 중 - 요청을 대기열에 추가"
+          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 중 - 요청을 대기열에 추가"
         );
         // 재발급 중이면, 요청을 큐에 저장하고 대기
         return new Promise((resolve, reject) => {
@@ -173,29 +181,40 @@ export class RemoteRequest implements RemoteRequestMethod {
       }
 
       // 토큰 재발급 시작
-      console.log("[RemoteRequestImpl] 토큰 재발급 시작");
+      console.log("[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 시작");
       this.isRefreshingToken = true;
 
       try {
         // 외부에서 주입받은 토큰 재발급 로직 실행
-        await this.tokenConfig.refreshLogic();
+        console.log(
+          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 API 호출"
+        );
+        await this.tokenConfig.tokenRefreshLogic();
 
         // 현재 요청 먼저 재시도
-        console.log("[RemoteRequestImpl] 현재 요청 재시도");
+        console.log(
+          "[RemoteRequestImpl] handleTokenRefresh :: 현재 요청 재시도"
+        );
         const currentResponse = await this._axiosInstance(originalRequest);
 
         // 대기열의 모든 요청 재시도
-        console.log("[RemoteRequestImpl] 대기열 요청들 처리 시작");
+        console.log(
+          "[RemoteRequestImpl] handleTokenRefresh :: 대기열 요청들 처리 시작"
+        );
         await this.processQueue(null);
 
         // 현재 요청 결과 반환
+        console.log(
+          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 완료, 현재 요청 결과 재반환"
+        );
         return currentResponse;
-      } catch (refreshError) {
+      } catch (refreshError: TokenRefreshErrorType) {
         // 토큰 재발급 중 에러 발생 시 대기열의 모든 요청 실패 처리
         console.log(
-          "[RemoteRequestImpl] 토큰 재발급 실패 - 대기열 요청들 실패 처리"
+          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패 - 대기열 요청들 실패 처리"
         );
         await this.processQueue(refreshError);
+        this.tokenConfig.tokenRefreshErrorHandler(refreshError as E);
         return Promise.reject(refreshError);
       } finally {
         this.isRefreshingToken = false;
@@ -213,7 +232,7 @@ export class RemoteRequest implements RemoteRequestMethod {
    * - 토큰 재발급 실패 시: 대기열의 모든 요청을 실패 처리
    */
   // MARK: - Process Queue Handler
-  private async processQueue(error: Error | unknown) {
+  private async processQueue(error: TokenRefreshErrorType | null) {
     // Promise.all을 사용하여 병렬 처리
     await Promise.all(
       this.failedQueue.map(async ({ resolve, reject, originalRequest }) => {
