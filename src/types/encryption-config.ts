@@ -1,4 +1,4 @@
-import { RequestInterceptor, ResponseInterceptor } from './request-interceptor';
+import { RequestInterceptor, ResponseInterceptor } from "./request-interceptor";
 
 /**
  * @interface EncryptionConfig
