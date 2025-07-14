@@ -38,22 +38,21 @@ export class RemoteRequest<
   /**
    * RemoteRequest 생성자
    *
-   * @param baseURL - API 서버의 기본 URL (예: 'https://api.example.com')
    * @param isUseCookie - 쿠키 사용 여부 (인증 토큰 등을 쿠키로 관리할지 결정)
-   * @param tokenConfig - 토큰 관련 설정˝
+   * @param tokenConfig - 토큰 관련 설정
    * @param encryptionConfig - 암호화 관련 설정
-   * @param errorMessages - 에러 메시지 커스터마이징 (선택적)
    */
   // MARK: - Constructor
   constructor(
-    baseURL: string,
     isUseCookie: boolean,
     private readonly tokenConfig: TokenRefreshConfig<T, E>,
     private readonly encryptionConfig?: EncryptionConfig
   ) {
+    checkTokenRefreshConfigParams(tokenConfig);
+    if (encryptionConfig) checkEncryptionConfigParams(encryptionConfig);
+
     // Axios 인스턴스 생성
     this._axiosInstance = axios.create({
-      baseURL: baseURL,
       withCredentials: isUseCookie, // 쿠키 포함 여부 설정
     });
 
@@ -71,7 +70,7 @@ export class RemoteRequest<
         this.checkUserIsIncludeEncryptUrl(config.url)
       ) {
         try {
-          return this.encryptionConfig?.requestInterceptor(config);
+          return this.encryptionConfig.requestInterceptor(config);
         } catch (error) {
           console.error(error);
           return Promise.reject(error);
@@ -189,7 +188,13 @@ export class RemoteRequest<
         console.log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 API 호출"
         );
-        await this.tokenConfig.tokenRefreshLogic();
+        const tokenReissueResponse = await this.tokenReissue(
+          this.tokenConfig.tokenReissueUrl
+        );
+        console.log(
+          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 응답",
+          tokenReissueResponse
+        );
 
         // 현재 요청 먼저 재시도
         console.log(
@@ -210,11 +215,14 @@ export class RemoteRequest<
         return currentResponse;
       } catch (refreshError: TokenRefreshErrorType) {
         // 토큰 재발급 중 에러 발생 시 대기열의 모든 요청 실패 처리
+        console.error(
+          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패",
+          refreshError
+        );
         console.log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패 - 대기열 요청들 실패 처리"
         );
         await this.processQueue(refreshError);
-        this.tokenConfig.tokenRefreshErrorHandler(refreshError as E);
         return Promise.reject(refreshError);
       } finally {
         this.isRefreshingToken = false;
@@ -276,5 +284,48 @@ export class RemoteRequest<
 
   head(url: string): Promise<AxiosResponse<unknown>> {
     return this._axiosInstance.head(url);
+  }
+
+  //MARK:- Token Reissue
+  private async tokenReissue(tokenReissueUrl: string): Promise<void> {
+    const response = await this.post(tokenReissueUrl, {});
+    if (response.status !== 200) {
+      throw new Error("토큰 재발급 실패");
+    }
+  }
+}
+
+// MARK:- Params Check
+function checkTokenRefreshConfigParams(
+  tokenConfig: TokenRefreshConfig<unknown, unknown>
+) {
+  if (!tokenConfig.checkTokenExpiredError) {
+    throw new Error("checkTokenExpiredError is required");
+  }
+
+  if (
+    !tokenConfig.tokenReissueUrl ||
+    tokenConfig.tokenReissueUrl === "" ||
+    !tokenConfig.tokenReissueUrl.includes("https")
+  ) {
+    throw new Error(
+      "tokenReissueUrl은 빈 값이거나 없으면 안 되고, https가 포함되어야 합니다."
+    );
+  }
+}
+
+function checkEncryptionConfigParams(encryptionConfig: EncryptionConfig) {
+  if (
+    !encryptionConfig.encryptUrlStr ||
+    encryptionConfig.encryptUrlStr.includes("/")
+  ) {
+    throw new Error("encryptUrlStr is required and must not contain '/'");
+  }
+  if (!encryptionConfig.requestInterceptor) {
+    throw new Error("requestInterceptor is required");
+  }
+
+  if (!encryptionConfig.responseInterceptor) {
+    throw new Error("responseInterceptor is required");
   }
 }
