@@ -96,6 +96,7 @@ export class RemoteRequest implements RemoteRequestMethod {
         }
         return response;
       },
+
       async (error: AxiosError) => {
         return this.handleTokenRefresh(error);
       }
@@ -167,8 +168,11 @@ export class RemoteRequest implements RemoteRequestMethod {
     if (isTokenExpiredError && !originalRequest._retry) {
       originalRequest._retry = true;
 
-      // 이미 토큰 재발급 중이면 큐에 추가 후 대기
-      if (this.isRefreshingToken) {
+      // 이미 토큰 재발급 중이면 큐에 추가 후 대기, 단) 토큰 재발급은 제외
+      if (
+        this.isRefreshingToken &&
+        !originalRequest.url?.includes(this.tokenConfig.tokenReissueUrl)
+      ) {
         console.log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 중 - 요청을 대기열에 추가"
         );
