@@ -39,6 +39,7 @@ export class RemoteRequest implements RemoteRequestMethod {
   // MARK: - Constructor
   constructor(
     isUseCookie: boolean,
+    private readonly removeConsole: boolean = true,
     private readonly tokenConfig: TokenRefreshConfig,
     private readonly encryptionConfig?: EncryptionConfig
   ) {
@@ -65,7 +66,7 @@ export class RemoteRequest implements RemoteRequestMethod {
         try {
           return this.encryptionConfig.requestInterceptor(config);
         } catch (error) {
-          console.error(error);
+          this._error(error);
           return Promise.reject(error);
         }
       }
@@ -90,7 +91,7 @@ export class RemoteRequest implements RemoteRequestMethod {
           try {
             return this.encryptionConfig.responseInterceptor(response);
           } catch (error) {
-            console.error(error);
+            this._error(error);
             return Promise.reject(error);
           }
         }
@@ -103,6 +104,28 @@ export class RemoteRequest implements RemoteRequestMethod {
     );
   }
 
+  /**
+   * 내부 로깅 함수 (removeConsole 값에 따라 콘솔 출력 제어)
+   */
+  private _log(...args: unknown[]) {
+    if (!this.removeConsole) {
+      // eslint-disable-next-line no-console
+      console.log(...args);
+    }
+  }
+  private _error(...args: unknown[]) {
+    if (!this.removeConsole) {
+      // eslint-disable-next-line no-console
+      console.error(...args);
+    }
+  }
+  private _warn(...args: unknown[]) {
+    if (!this.removeConsole) {
+      // eslint-disable-next-line no-console
+      console.warn(...args);
+    }
+  }
+
   // MARK: - 암호화 URL 포함 여부 확인
   /**
    * 암호화가 필요한 URL인지 확인
@@ -113,7 +136,7 @@ export class RemoteRequest implements RemoteRequestMethod {
     url: string | null | undefined
   ): boolean {
     if (!url) {
-      console.error(
+      this._error(
         "[RemoteRequestImpl] checkUserIsIncludeEncryptUrl :: url 확인 필요 | ",
         url
       );
@@ -122,7 +145,7 @@ export class RemoteRequest implements RemoteRequestMethod {
     const isIncludeEncryptUrl = url.includes(
       this.encryptionConfig?.encryptUrlStr ?? ""
     );
-    console.log(
+    this._log(
       `[RemoteRequestImpl] checkUserIsIncludeEncryptUrl :: url 확인 완료 | url: ${url} | ${
         isIncludeEncryptUrl ? "암호화 문자열 포함" : "암호화 문자열 미포함"
       }`
@@ -154,15 +177,15 @@ export class RemoteRequest implements RemoteRequestMethod {
     // 토큰 만료 에러 여부 확인
     const isTokenExpiredError = this.tokenConfig.checkTokenExpiredError(error);
 
-    console.log("[RemoteRequestImpl] handleTokenRefresh Debug");
-    console.log(`error.response?.status: ${error.response?.status}`);
-    console.log(
+    this._log("[RemoteRequestImpl] handleTokenRefresh Debug");
+    this._log(`error.response?.status: ${error.response?.status}`);
+    this._log(
       `isTokenExpiredError: ${isTokenExpiredError}, ${
         isTokenExpiredError ? "토큰 만료 에러" : "토큰 만료 에러 아님"
       }`
     );
-    console.log(`this.isRefreshingToken: ${this.isRefreshingToken}`);
-    console.log(`originalRequest._retry: ${originalRequest._retry}`);
+    this._log(`this.isRefreshingToken: ${this.isRefreshingToken}`);
+    this._log(`originalRequest._retry: ${originalRequest._retry}`);
 
     // 토큰 만료 에러이고 아직 재시도하지 않은 요청인 경우
     if (isTokenExpiredError && !originalRequest._retry) {
@@ -173,7 +196,7 @@ export class RemoteRequest implements RemoteRequestMethod {
         this.isRefreshingToken &&
         !originalRequest.url?.includes(this.tokenConfig.tokenReissueUrl)
       ) {
-        console.log(
+        this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 중 - 요청을 대기열에 추가"
         );
         return new Promise((resolve, reject) => {
@@ -182,42 +205,40 @@ export class RemoteRequest implements RemoteRequestMethod {
       }
 
       // 토큰 재발급 시작
-      console.log("[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 시작");
+      this._log("[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 시작");
       this.isRefreshingToken = true;
 
       try {
         // 외부에서 주입받은 토큰 재발급 API 호출
-        console.log(
+        this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 API 호출"
         );
         const tokenReissueResponse = await this.tokenReissue(
           this.tokenConfig.tokenReissueUrl
         );
-        console.log(
+        this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 응답",
           tokenReissueResponse
         );
 
         // 현재 요청 재시도
-        console.log(
-          "[RemoteRequestImpl] handleTokenRefresh :: 현재 요청 재시도"
-        );
+        this._log("[RemoteRequestImpl] handleTokenRefresh :: 현재 요청 재시도");
         const currentResponse = await this._axiosInstance(originalRequest);
 
         // 큐에 쌓인 모든 요청 재시도
-        console.log(
+        this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 대기열 요청들 처리 시작"
         );
         await this.processQueue(null);
 
         // 현재 요청 결과 반환
-        console.log(
+        this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공, 현재 요청 결과 재반환"
         );
         return currentResponse;
       } catch (refreshError: unknown) {
         // 토큰 재발급 실패 시 큐에 쌓인 모든 요청 실패 처리
-        console.error(
+        this._error(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패",
           refreshError
         );
@@ -225,13 +246,13 @@ export class RemoteRequest implements RemoteRequestMethod {
         const rejectPromise = Promise.reject(refreshError);
 
         await this.processQueue(refreshError);
-        console.log(
+        this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패 - 대기열 요청들 실패 처리"
         );
         return rejectPromise;
       } finally {
         this.isRefreshingToken = false;
-        console.log("[RemoteRequestImpl] 토큰 재발급 완료");
+        this._log("[RemoteRequestImpl] 토큰 재발급 완료");
       }
     }
 
@@ -299,9 +320,9 @@ export class RemoteRequest implements RemoteRequestMethod {
   private async tokenReissue(tokenReissueUrl: string): Promise<void> {
     try {
       await this.post(tokenReissueUrl, {});
-      console.log("[RemoteRequestImpl] tokenReissue :: 토큰 재발급 성공");
+      this._log("[RemoteRequestImpl] tokenReissue :: 토큰 재발급 성공");
     } catch (error) {
-      console.error(
+      this._error(
         "[RemoteRequestImpl] tokenReissue :: 토큰 재발급 실패",
         error
       );
