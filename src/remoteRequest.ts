@@ -358,7 +358,7 @@ function checkTokenRefreshConfigParams(tokenConfig: TokenRefreshConfig) {
  */
 function checkEncryptionConfigParams(encryptionConfig: EncryptionConfig) {
   if (
-    !encryptionConfig.encryptUrlStr ||
+    !encryptionConfig.encryptUrlStr &&
     encryptionConfig.encryptUrlStr.includes("/")
   ) {
     throw new Error("encryptUrlStr is required and must not contain '/'");
