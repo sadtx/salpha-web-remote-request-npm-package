@@ -5,12 +5,18 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "version": "npm run changelog && git add CHANGELOG.md",
+    "changelog": "conventional-changelog -p angular -i CHANGELOG.md -s",
+    "release": "npm version patch && npm publish",
+    "release:minor": "npm version minor && npm publish",
+    "release:major": "npm version major && npm publish"
   },
   "dependencies": {
     "axios": "^1.10.0"
   },
   "devDependencies": {
+    "conventional-changelog-cli": "^5.0.0",
     "typescript": "^5.0.0"
   },
   "publishConfig": {
