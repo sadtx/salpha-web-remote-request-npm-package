@@ -41,7 +41,9 @@ export class RemoteRequest implements RemoteRequestMethod {
     isUseCookie: boolean,
     private readonly removeConsole: boolean = true,
     private readonly tokenConfig: TokenRefreshConfig,
-    private readonly encryptionConfig?: EncryptionConfig
+    private readonly encryptionConfig?: EncryptionConfig,
+    private readonly reissueTokenSuccessCallback?: () => Promise<void>,
+    private readonly reissueTokenFailureCallback?: () => Promise<void>
   ) {
     checkTokenRefreshConfigParams(tokenConfig);
     if (encryptionConfig) checkEncryptionConfigParams(encryptionConfig);
@@ -235,6 +237,17 @@ export class RemoteRequest implements RemoteRequestMethod {
         this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공, 현재 요청 결과 재반환"
         );
+
+        if (this.reissueTokenSuccessCallback) {
+          this._log(
+            "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공 콜백 호출"
+          );
+          await this.reissueTokenSuccessCallback();
+          this._log(
+            "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공 콜백 호출 완료"
+          );
+        }
+
         return currentResponse;
       } catch (refreshError: unknown) {
         // 토큰 재발급 실패 시 큐에 쌓인 모든 요청 실패 처리
@@ -249,10 +262,24 @@ export class RemoteRequest implements RemoteRequestMethod {
         this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패 - 대기열 요청들 실패 처리"
         );
+
+        if (this.reissueTokenFailureCallback) {
+          this._log(
+            "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패 콜백 호출"
+          );
+          await this.reissueTokenFailureCallback();
+          this._log(
+            "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 실패 콜백 호출 완료"
+          );
+        }
+
+        this._log(
+          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 최종 실패"
+        );
         return rejectPromise;
       } finally {
         this.isRefreshingToken = false;
-        this._log("[RemoteRequestImpl] 토큰 재발급 완료");
+        this._log("[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 완료");
       }
     }
 
