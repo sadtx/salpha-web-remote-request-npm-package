@@ -86,7 +86,6 @@ export class RemoteRequest implements RemoteRequestMethod {
     this._axiosInstance.interceptors.response.use(
       async (response: AxiosResponse<unknown>) => {
         if (
-          response.config.method === "get" &&
           this.encryptionConfig &&
           this.checkUserIsIncludeEncryptUrl(response.config.url)
         ) {
