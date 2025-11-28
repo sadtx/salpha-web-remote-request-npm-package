@@ -8,6 +8,10 @@ import axios, {
 import { RemoteRequestMethod } from "./remoteRequestMehtodType";
 import { EncryptionConfig } from "./types/encryption-config";
 import { TokenRefreshConfig } from "./types/token-refresh-config";
+import {
+  TokenTransportConfig,
+  TokenTransportType,
+} from "./types/token-trasport-config";
 
 interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
@@ -15,6 +19,8 @@ interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
 
 export class RemoteRequest implements RemoteRequestMethod {
   private _axiosInstance: AxiosInstance;
+  private isUseCookie: boolean;
+  private fetchAuthTokenMethod: (() => Promise<string>) | null | undefined;
   private isRefreshingToken: boolean = false;
 
   /**
@@ -38,7 +44,7 @@ export class RemoteRequest implements RemoteRequestMethod {
    */
   // MARK: - Constructor
   constructor(
-    isUseCookie: boolean,
+    tokenTransportConfig: TokenTransportConfig,
     private readonly removeConsole: boolean = true,
     private readonly tokenConfig: TokenRefreshConfig,
     private readonly encryptionConfig?: EncryptionConfig,
@@ -47,10 +53,20 @@ export class RemoteRequest implements RemoteRequestMethod {
   ) {
     checkTokenRefreshConfigParams(tokenConfig);
     if (encryptionConfig) checkEncryptionConfigParams(encryptionConfig);
+    if (tokenTransportConfig)
+      checkTokenTransportConfigParams(tokenTransportConfig);
+
+    // 쿠키 사용 여부 설정
+    this.isUseCookie =
+      tokenTransportConfig.tokenTransportType === TokenTransportType.WEB_COOKIE
+        ? true
+        : false;
+
+    this.fetchAuthTokenMethod = tokenTransportConfig.fetchAuthTokenMethod;
 
     // Axios 인스턴스 생성 (쿠키 사용 여부 설정)
     this._axiosInstance = axios.create({
-      withCredentials: isUseCookie,
+      withCredentials: this.isUseCookie,
     });
 
     /**
@@ -66,6 +82,12 @@ export class RemoteRequest implements RemoteRequestMethod {
         this.checkUserIsIncludeEncryptUrl(config.url)
       ) {
         try {
+          if (!this.isUseCookie) {
+            const token = await tokenTransportConfig.fetchAuthTokenMethod?.();
+            if (token && token !== "") {
+              config.headers.Authorization = `Bearer ${token}`;
+            }
+          }
           return this.encryptionConfig.requestInterceptor(config);
         } catch (error) {
           this._error(error);
@@ -387,13 +409,32 @@ function checkEncryptionConfigParams(encryptionConfig: EncryptionConfig) {
     !encryptionConfig.encryptUrlStr &&
     encryptionConfig.encryptUrlStr.includes("/")
   ) {
-    throw new Error("encryptUrlStr is required and must not contain '/'");
+    throw new Error(
+      "[RemoteRequestImpl] encryptUrlStr is required and must not contain '/'"
+    );
   }
   if (!encryptionConfig.requestInterceptor) {
-    throw new Error("requestInterceptor is required");
+    throw new Error("[RemoteRequestImpl] requestInterceptor is required");
   }
 
   if (!encryptionConfig.responseInterceptor) {
-    throw new Error("responseInterceptor is required");
+    throw new Error("[RemoteRequestImpl] responseInterceptor is required");
+  }
+}
+
+function checkTokenTransportConfigParams(config: TokenTransportConfig) {
+  if (config.tokenTransportType === TokenTransportType.WEB_COOKIE) {
+    if (config.fetchAuthTokenMethod) {
+      throw new Error(
+        "[RemoteRequestImpl] fetchAuthTokenMethod is not Required In Web Cookie Mode"
+      );
+    }
+  }
+  if (config.tokenTransportType === TokenTransportType.STORAGE) {
+    if (!config.fetchAuthTokenMethod) {
+      throw new Error(
+        "[RemoteRequestImpl] fetchAuthTokenMethod is required In Storage Mode"
+      );
+    }
   }
 }
