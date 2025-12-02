@@ -76,18 +76,20 @@ export class RemoteRequest implements RemoteRequestMethod {
      */
     // MARK: - Request Interceptor
     this._axiosInstance.interceptors.request.use(async (config) => {
+      // 일반 토큰을 사용하는 경우(쿠키 사용이 아닌 경우) 암호화 경로(/s/)와 관계없이 토큰을 무조건 넣어줌
+      if (!this.isUseCookie) {
+        const token = await tokenTransportConfig.fetchAuthTokenMethod?.();
+        if (token && token !== "") {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      }
+
       if (
         (config.method === "post" || config.method === "put") &&
         this.encryptionConfig &&
         this.checkUserIsIncludeEncryptUrl(config.url)
       ) {
         try {
-          if (!this.isUseCookie) {
-            const token = await tokenTransportConfig.fetchAuthTokenMethod?.();
-            if (token && token !== "") {
-              config.headers.Authorization = `Bearer ${token}`;
-            }
-          }
           return this.encryptionConfig.requestInterceptor(config);
         } catch (error) {
           this._error(error);
