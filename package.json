@@ -1,8 +1,9 @@
 {
   "name": "@sadtx/remote-request",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "repository": "https://github.com/sadtx/salpha-web-remote-request-npm-package",
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",

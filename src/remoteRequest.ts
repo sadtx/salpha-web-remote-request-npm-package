@@ -20,7 +20,6 @@ interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
 export class RemoteRequest implements RemoteRequestMethod {
   private _axiosInstance: AxiosInstance;
   private isUseCookie: boolean;
-  private fetchAuthTokenMethod: (() => Promise<string>) | null | undefined;
   private isRefreshingToken: boolean = false;
 
   /**
@@ -44,25 +43,36 @@ export class RemoteRequest implements RemoteRequestMethod {
    */
   // MARK: - Constructor
   constructor(
-    tokenTransportConfig: TokenTransportConfig,
+    private readonly tokenTransportConfig: TokenTransportConfig,
     private readonly removeConsole: boolean = true,
     private readonly tokenConfig: TokenRefreshConfig,
     private readonly encryptionConfig?: EncryptionConfig,
-    private readonly reissueTokenSuccessCallback?: () => Promise<void>,
+    private readonly reissueTokenSuccessCallback?: (
+      accessToken: string,
+      refreshToken: string
+    ) => Promise<void>,
     private readonly reissueTokenFailureCallback?: () => Promise<void>
   ) {
-    checkTokenRefreshConfigParams(tokenConfig);
-    if (encryptionConfig) checkEncryptionConfigParams(encryptionConfig);
-    if (tokenTransportConfig)
-      checkTokenTransportConfigParams(tokenTransportConfig);
+    this.checkTokenRefreshConfigParams(this.tokenConfig);
+    if (this.encryptionConfig)
+      this.checkEncryptionConfigParams(this.encryptionConfig);
+    if (this.tokenTransportConfig)
+      this.checkTokenTransportConfigParams(this.tokenTransportConfig);
 
     // 쿠키 사용 여부 설정
     this.isUseCookie =
-      tokenTransportConfig.tokenTransportType === TokenTransportType.WEB_COOKIE
+      this.tokenTransportConfig.tokenTransportType ===
+      TokenTransportType.WEB_COOKIE
         ? true
         : false;
 
-    this.fetchAuthTokenMethod = tokenTransportConfig.fetchAuthTokenMethod;
+    // 토큰 기반 인증 시 토큰 성공 콜백 추가 여부 확인
+    // 콜백을 통해서 저장해야함
+    if (!this.isUseCookie && reissueTokenSuccessCallback != null) {
+      throw new Error(
+        "[RemoteRequestImpl] reissueTokenSuccessCallback is required In Token Mode"
+      );
+    }
 
     // Axios 인스턴스 생성 (쿠키 사용 여부 설정)
     this._axiosInstance = axios.create({
@@ -78,9 +88,9 @@ export class RemoteRequest implements RemoteRequestMethod {
     this._axiosInstance.interceptors.request.use(async (config) => {
       // 일반 토큰을 사용하는 경우(쿠키 사용이 아닌 경우) 암호화 경로(/s/)와 관계없이 토큰을 무조건 넣어줌
       if (!this.isUseCookie) {
-        const token = await tokenTransportConfig.fetchAuthTokenMethod?.();
-        if (token && token !== "") {
-          config.headers.Authorization = `Bearer ${token}`;
+        const token = await this.tokenTransportConfig.fetchAuthTokenMethod?.();
+        if (token && token.accessToken !== "") {
+          config.headers.Authorization = `Bearer ${token.accessToken}`;
         }
       }
 
@@ -179,11 +189,11 @@ export class RemoteRequest implements RemoteRequestMethod {
   }
 
   /**
-   * 토큰 재발급 처리
-   * - 토큰 만료 에러 발생 시 토큰 재발급 시도
-   * - 재발급 중이면 큐에 요청 추가
-   * - 재발급 성공 시 큐에 쌓인 요청 모두 재시도
-   * - 재발급 실패 시 큐에 쌓인 요청 모두 실패 처리
+   * 토큰 재발급 처리 (업데이트 버전)
+   * - 토큰 만료 에러 감지 시 토큰 재발급 로직 실행
+   * - 재발급 진행 중에는 들어온 요청들을 대기열에 쌓음
+   * - 재발급 성공 시 대기열의 요청들 일괄 재시도
+   * - 재발급 실패 시 대기열의 요청들 모두 에러 처리
    */
   // MARK: - Token Refresh Handler
   private async handleTokenRefresh(error: AxiosError): Promise<AxiosResponse> {
@@ -234,17 +244,45 @@ export class RemoteRequest implements RemoteRequestMethod {
       this.isRefreshingToken = true;
 
       try {
-        // 외부에서 주입받은 토큰 재발급 API 호출
+        // 외부에서 주입받은 토큰 재발급 API 호출 로직 실행
         this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 API 호출"
         );
-        const tokenReissueResponse = await this.tokenReissue(
-          this.tokenConfig.tokenReissueUrl
-        );
-        this._log(
-          "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 응답",
-          tokenReissueResponse
-        );
+        if (this.isUseCookie) {
+          // CASE 1: 쿠키 인증 방식 토큰 재발급 API 호출
+          this._log(
+            "[RemoteRequestImpl] handleTokenRefresh :: 쿠키 인증 방식 토큰 재발급 API 호출"
+          );
+          await this.tokenReissueWhenUseCookie(
+            this.tokenConfig.tokenReissueUrl
+          );
+        } else {
+          // CASE 2: 스토리지 인증 방식 토큰 재발급 API 호출
+          this._log(
+            "[RemoteRequestImpl] handleTokenRefresh :: 스토리지 인증 방식 토큰 재발급 API 호출"
+          );
+          const result =
+            await this.tokenTransportConfig.fetchAuthTokenMethod?.();
+          await this.tokenReissueWhenUseStorage(
+            this.tokenConfig.tokenReissueUrl,
+            result?.accessToken ?? "",
+            result?.refreshToken ?? ""
+          );
+          // 신규 발급된 토큰을 저장하는 콜백 실행
+          if (this.reissueTokenSuccessCallback) {
+            this._log(
+              "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공 콜백 호출"
+            );
+            await this.reissueTokenSuccessCallback(
+              result?.accessToken ?? "",
+              result?.refreshToken ?? ""
+            );
+            this._log(
+              "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공 콜백 호출 완료"
+            );
+          }
+        }
+        this._log("[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공");
 
         // 현재 요청 재시도
         this._log("[RemoteRequestImpl] handleTokenRefresh :: 현재 요청 재시도");
@@ -260,16 +298,6 @@ export class RemoteRequest implements RemoteRequestMethod {
         this._log(
           "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공, 현재 요청 결과 재반환"
         );
-
-        if (this.reissueTokenSuccessCallback) {
-          this._log(
-            "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공 콜백 호출"
-          );
-          await this.reissueTokenSuccessCallback();
-          this._log(
-            "[RemoteRequestImpl] handleTokenRefresh :: 토큰 재발급 성공 콜백 호출 완료"
-          );
-        }
 
         return currentResponse;
       } catch (refreshError: unknown) {
@@ -364,10 +392,14 @@ export class RemoteRequest implements RemoteRequestMethod {
 
   // MARK: - 토큰 재발급 API 호출
   /**
-   * 토큰 재발급 API 호출
-   * @param tokenReissueUrl - 토큰 재발급 엔드포인트
+   * [쿠키 인증 방식] 토큰 재발급 API 호출
+   * - 서버에서 쿠키 기반 세션 인증을 사용하는 경우 토큰 재발급 엔드포인트로 POST 요청을 보냄
+   * @param tokenReissueUrl - 토큰 재발급 엔드포인트 URL
+   * @returns void
    */
-  private async tokenReissue(tokenReissueUrl: string): Promise<void> {
+  private async tokenReissueWhenUseCookie(
+    tokenReissueUrl: string
+  ): Promise<void> {
     try {
       await this.post(tokenReissueUrl, {});
       this._log("[RemoteRequestImpl] tokenReissue :: 토큰 재발급 성공");
@@ -379,64 +411,94 @@ export class RemoteRequest implements RemoteRequestMethod {
       throw error;
     }
   }
-}
 
-// MARK: - 파라미터 유효성 검사 함수
-/**
- * 토큰 갱신 설정 파라미터 유효성 검사
- * @param tokenConfig - 토큰 갱신 설정 객체
- */
-function checkTokenRefreshConfigParams(tokenConfig: TokenRefreshConfig) {
-  if (!tokenConfig.checkTokenExpiredError) {
-    throw new Error("checkTokenExpiredError is required");
+  /**
+   * [스토리지 인증 방식] 토큰 재발급 API 호출
+   * - accessToken/refreshToken을 request body에 담아 토큰 재발급 엔드포인트로 POST 요청을 보냄
+   * @param tokenReissueUrl - 토큰 재발급 엔드포인트 URL
+   * @param accessToken - 현재 accessToken (옵션)
+   * @param refreshToken - 현재 refreshToken (옵션)
+   * @returns 재발급된 accessToken과 refreshToken이 담긴 객체
+   */
+  private async tokenReissueWhenUseStorage(
+    tokenReissueUrl: string,
+    accessToken: string,
+    refreshToken: string
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    try {
+      const response = await this.post(tokenReissueUrl, {
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+      });
+
+      this._log("[RemoteRequestImpl] tokenReissue :: 토큰 재발급 성공");
+      return response.data as { accessToken: string; refreshToken: string };
+    } catch (error) {
+      this._error(
+        "[RemoteRequestImpl] tokenReissue :: 토큰 재발급 실패",
+        error
+      );
+      throw error;
+    }
   }
 
-  if (
-    !tokenConfig.tokenReissueUrl ||
-    tokenConfig.tokenReissueUrl === "" ||
-    !tokenConfig.tokenReissueUrl.includes("https")
-  ) {
-    throw new Error(
-      "tokenReissueUrl은 빈 값이거나 없으면 안 되고, https가 포함되어야 합니다."
-    );
-  }
-}
+  // MARK: - 파라미터 유효성 검사 함수
+  /**
+   * 토큰 갱신 설정 파라미터 유효성 검사
+   * @param tokenConfig - 토큰 갱신 설정 객체
+   */
+  private checkTokenRefreshConfigParams(tokenConfig: TokenRefreshConfig) {
+    if (!tokenConfig.checkTokenExpiredError) {
+      throw new Error("checkTokenExpiredError is required");
+    }
 
-/**
- * 암호화 설정 파라미터 유효성 검사
- * @param encryptionConfig - 암호화 설정 객체
- */
-function checkEncryptionConfigParams(encryptionConfig: EncryptionConfig) {
-  if (
-    !encryptionConfig.encryptUrlStr &&
-    encryptionConfig.encryptUrlStr.includes("/")
-  ) {
-    throw new Error(
-      "[RemoteRequestImpl] encryptUrlStr is required and must not contain '/'"
-    );
-  }
-  if (!encryptionConfig.requestInterceptor) {
-    throw new Error("[RemoteRequestImpl] requestInterceptor is required");
-  }
-
-  if (!encryptionConfig.responseInterceptor) {
-    throw new Error("[RemoteRequestImpl] responseInterceptor is required");
-  }
-}
-
-function checkTokenTransportConfigParams(config: TokenTransportConfig) {
-  if (config.tokenTransportType === TokenTransportType.WEB_COOKIE) {
-    if (config.fetchAuthTokenMethod) {
+    if (
+      !tokenConfig.tokenReissueUrl ||
+      tokenConfig.tokenReissueUrl === "" ||
+      !tokenConfig.tokenReissueUrl.includes("https")
+    ) {
       throw new Error(
-        "[RemoteRequestImpl] fetchAuthTokenMethod is not Required In Web Cookie Mode"
+        "tokenReissueUrl은 빈 값이거나 없으면 안 되고, https가 포함되어야 합니다."
       );
     }
   }
-  if (config.tokenTransportType === TokenTransportType.STORAGE) {
-    if (!config.fetchAuthTokenMethod) {
+
+  /**
+   * 암호화 설정 파라미터 유효성 검사
+   * @param encryptionConfig - 암호화 설정 객체
+   */
+  private checkEncryptionConfigParams(encryptionConfig: EncryptionConfig) {
+    if (
+      !encryptionConfig.encryptUrlStr &&
+      encryptionConfig.encryptUrlStr.includes("/")
+    ) {
       throw new Error(
-        "[RemoteRequestImpl] fetchAuthTokenMethod is required In Storage Mode"
+        "[RemoteRequestImpl] encryptUrlStr is required and must not contain '/'"
       );
+    }
+    if (!encryptionConfig.requestInterceptor) {
+      throw new Error("[RemoteRequestImpl] requestInterceptor is required");
+    }
+
+    if (!encryptionConfig.responseInterceptor) {
+      throw new Error("[RemoteRequestImpl] responseInterceptor is required");
+    }
+  }
+
+  private checkTokenTransportConfigParams(config: TokenTransportConfig) {
+    if (config.tokenTransportType === TokenTransportType.WEB_COOKIE) {
+      if (config.fetchAuthTokenMethod) {
+        throw new Error(
+          "[RemoteRequestImpl] fetchAuthTokenMethod is not Required In Web Cookie Mode"
+        );
+      }
+    }
+    if (config.tokenTransportType === TokenTransportType.STORAGE) {
+      if (!config.fetchAuthTokenMethod) {
+        throw new Error(
+          "[RemoteRequestImpl] fetchAuthTokenMethod is required In Storage Mode"
+        );
+      }
     }
   }
 }
