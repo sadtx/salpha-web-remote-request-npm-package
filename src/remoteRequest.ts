@@ -66,9 +66,12 @@ export class RemoteRequest implements RemoteRequestMethod {
         ? true
         : false;
 
+    const isExistLogic =
+      this.reissueTokenSuccessCallback !== undefined &&
+      this.reissueTokenSuccessCallback !== null;
     // 토큰 기반 인증 시 토큰 성공 콜백 추가 여부 확인
     // 콜백을 통해서 저장해야함
-    if (!this.isUseCookie && reissueTokenSuccessCallback != null) {
+    if (!this.isUseCookie && !isExistLogic) {
       throw new Error(
         "[RemoteRequestImpl] reissueTokenSuccessCallback is required In Token Mode"
       );
